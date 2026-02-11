@@ -1,0 +1,894 @@
+---
+title: "Moving Beyond Linearity"
+subtitle: "Chapter 7: ISLR2 Exercise Solutions"
+author: "Shad Ali Shah"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
+    theme: cosmo
+    colorlinks: true
+    link-citations: true
+    df-print: kable
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    crossref:
+      fig-title: "Figure"
+      tbl-title: "Table"
+      fig-prefix: "Fig."
+      tbl-prefix: "Table"
+execute:
+  echo: true
+  warning: false
+  message: false
+  error: true
+  cache: false
+  keep-going: true
+  fig-width: 6.5
+  fig-height: 4
+jupyter: python3
+---
+
+# Chapter 7
+
+## Exercise 6
+
+```{python}
+import numpy as np, pandas as pd
+from matplotlib.pyplot import subplots
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+from statsmodels.api import OLS
+from ISLP import load_data
+from ISLP.models import (summarize,
+                         Stepwise,
+                         sklearn_selected,
+                         poly,
+                         ModelSpec as MS)
+from statsmodels.stats.anova import anova_lm
+from ISLP.models import sklearn_sm
+from sklearn.model_selection import cross_validate, KFold
+from sklearn.linear_model import LinearRegression
+from functools import partial
+```
+
+```{python}
+from pygam import (s as s_gam, l as l_gam, f as f_gam, LinearGAM, LogisticGAM)
+from ISLP.transforms import (BSpline, NaturalSpline)
+from ISLP.models import bs, ns
+from ISLP.pygam import (approx_lam, degrees_of_freedom, plot as plot_gam, anova as anova_gam)
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score,mean_squared_error
+```
+
+```{python}
+Wage=load_data('Wage')
+y=Wage['wage']
+age=Wage['age']
+```
+
+### (a)
+
+Generally speaking it is unusual to use a polynomial degree greater than 4 because for larger degrees polynomials become overly flexible, which raises the risk of overfitting the data.
+For this reason we choose test the cross validation model for a maximum degree of 6.
+
+The cross validation error is minimal when the polynomial degree equals 4.
+Now let's use ANOVA to check the obtained result.
+
+```{python}
+models = [MS([poly('age', degree=d)]) for d in range(1, 7)]
+Xs = [model.fit_transform(Wage) for model in models]
+anova_lm(*[sm.OLS(y, X_).fit() for X_ in Xs])
+```
+
+The results above show that model[4] and model[5] cannot be optimal since relative p-values are already larger than 5%.
+On the other side we notice the best improvement for model[3] which corresponds to polynomial of degree 4.
+Clearly both cross-vaidation approach and ANOVA yield the same results.
+Now let's plot the fitted polynomial against the data scatter. We opt to define a function which does the work as the lab did. For this function must be useful whenever we opt for another polynomial degree.
+
+```{python}
+# define a grid of 100 points over which we can compute model predictions 
+age_grid = np.linspace(age.min(), age.max(), 100)
+age_df=pd.DataFrame({'age':age_grid})
+```
+
+```{python}
+def plot_wage_fit(age_df, basis, title):
+
+    X = basis.transform(Wage)
+    Xnew = basis.transform(age_df)
+    M = sm.OLS(y, X).fit()
+    preds = M.get_prediction(Xnew)
+    bands = preds.conf_int(alpha=0.05)
+    fig, ax = subplots(figsize=(8,8))
+    ax.scatter(age,y,facecolor='gray',alpha=0.5)
+    for val, ls in zip([preds.predicted_mean,bands[:,0],bands[:,1]],['b','r--','r--']):
+        ax.plot(age_df.values, val, ls, linewidth=3)
+    ax.set_title(title, fontsize=20)
+    ax.set_xlabel('Age', fontsize=20)
+    ax.set_ylabel('Wage', fontsize=20);
+    return ax
+```
+
+age_df is fixed and already defined, basis will be the fitted model corresponding to polynomial of degree 4 and title can be chosen as expressive as it must be.
+
+```{python}
+model4=MS([poly('age', degree=4)]).fit(Wage)
+plot_wage_fit(age_df, model4, '4 degree polynomial')
+```
+
+```{python}
+#Perform corss validation to find the best polynomial degree
+cv_error = np.zeros(6)
+H = np.array(age)
+M = sklearn_sm(sm.OLS)
+#Let's introduce splits. We choose 5-folds cross validation for this example
+cv = KFold(n_splits=5,shuffle=True,random_state=0) # The argument shuffle allows samples to overlap
+for i, d in enumerate(range(1,7)):
+    Xcross = np.power.outer(H, np.arange(d+1))
+    M_CV = cross_validate(M,Xcross,y,cv=cv)
+    cv_error[i] = np.mean(M_CV['test_score'])
+cv_error
+```
+
+### (b)
+
+We'll try to compare 20 models of step functions using cross validation. 
+Each of these models correponds to a different number of cutpoints.
+
+For this we'll let the function qcut() from the pandas library automatically choose cutpoints based on quantiles. 
+
+```{python}
+cv_error_cuts = np.zeros(20)
+for i, d in enumerate(range(1,21)):
+    Xcross = pd.qcut(age, d+1)
+    M_CV_cut = cross_validate(M,pd.get_dummies(Xcross),y,cv=cv)
+    cv_error_cuts[i] = np.mean(M_CV_cut['test_score'])
+cv_error_cuts
+```
+
+The minimal CV error occurs when there are 12 cutpoints. We also could have chosen 8 cutpoints if there were less investigations.
+First, we must fit the model as the function previously defined does not take into account the modified data frame coming from splitting the age feature.
+
+```{python}
+n_groups=12
+cut_age = pd.qcut(age, n_groups+1)
+# Get dummy features relatively to age groups
+dummy_age=pd.get_dummies(cut_age)
+```
+
+```{python}
+#Create a new data frame to fit the new model
+df_step=pd.concat([dummy_age, y], axis=1)
+# Assign roles to each of the columns of the new data set and ft the model
+Xnew=df_step.iloc[:,:-1]
+ynew=df_step.iloc[:,-1]
+ynewnp=np.array(ynew)[:,np.newaxis]
+model_step=MS(Xnew,intercept=False).fit(df_step)
+X=model_step.transform(df_step)
+res=sm.OLS(ynewnp,X).fit()
+X.shape
+```
+
+```{python}
+#Define a gird over which we can plot predictions. Since the ages start from 18 and end at 80
+# we choose to define a grid of integer numbers through this interval
+X_grid=np.linspace(18,80)
+#Now let's cut the defined grid over the predifined groups. We use the cut function to create an
+# ordered set of values
+groups = pd.cut(X_grid, n_groups+1)
+dummies = pd.get_dummies(groups)
+dummies.shape
+```
+
+```{python}
+# Plot the function 
+X_step = np.linspace(18,80)
+y_step = res.predict(dummies)
+fig, ax = subplots(figsize=(8,8))
+plt.scatter(age,y)
+plt.plot(X_step, y_step,'-r')
+ax.set_title('Step function', fontsize=20)
+ax.set_xlabel('Age', fontsize=20)
+ax.set_ylabel('Wage', fontsize=20)
+```
+
+## Exercise 7
+
+```{python}
+Wage.info()
+```
+
+```{python}
+# Convert both 'maritl' and 'joblcass' columns to categorical data
+Wage['maritl']=Wage['maritl'].astype('category')
+Wage['jobclass']=Wage['jobclass'].astype('category')
+```
+
+```{python}
+Wage.info()
+```
+
+As the Wage data set contains 3000 observations, it is preferable to use distribution plots. We'll choose to draw boxplots then to discover the relationships among 'wage' feature and both 'maritl' and 'jobclass'.
+
+```{python}
+Wage.boxplot(column=['wage'],by=['maritl']);
+```
+
+It seems from observing the medians that wage is highet for married people.
+
+```{python}
+Wage.boxplot(column=['wage'],by=['jobclass']);
+```
+
+Information jobs are better paid than industrial ones.
+
+Now we should explore models with and without those categorical features along with age feature through GAM. We can compare models using ANOVA_GAM.
+
+```{python}
+# Compare three models: first model is the full model cause it contains all the three features
+# second model contains age and maritl features
+# third model contains age and jobclass features
+
+# Let's fit the first model
+gam_full = LinearGAM(s_gam(0) + f_gam(1, lam=0) +f_gam(2, lam=0))# lam=0 to avoid shrinkage for categ terms
+Xgam = np.column_stack([age, Wage['maritl'].cat.codes, Wage['jobclass'].cat.codes])
+gam_full = gam_full.fit(Xgam, y)
+
+#Fit the second model
+gam_m=LinearGAM(s_gam(0) + f_gam(1, lam=0))
+gam_m = gam_m.fit(Xgam, y)
+
+#Fit the third model
+gam_j=LinearGAM(s_gam(0) + f_gam(2, lam=0))
+gam_j = gam_j.fit(Xgam, y)
+```
+
+```{python}
+#compare the models
+#Switch the order of arguments in anova_gam to see the difference. Basically this enables the function
+# to choose positive degrees of freedom for F test.
+anova_gam(gam_j,gam_m,gam_full)
+```
+
+We find a compelling result showing that the full model, gven its pvalue, is better that the other ones. 
+
+In order to present the results, we draw the partial dependence plots for each of the features.
+For that, we assume that the three studied features are independant.
+
+```{python}
+# Effect of age in the full model on the wage
+fig, ax = subplots(figsize=(8, 8))
+ax = plot_gam(gam_full, 0)
+ax.set_xlabel('Age')
+ax.set_ylabel('Effect on wage')
+ax.set_title('Partial dependence of wage on age',fontsize=20);
+```
+
+The function is somewhat wiggly. This issue has been overcome in the lab by refitting the model along with specifiying degrees of freedom.
+In either cases, the tendancy of age effect on wage will be the same. It shows that the best wage is obtained at the age between 40 and approximately 45.
+A similar wage range can be seen at the age around 60.
+
+```{python}
+#The following two lines are added because plot_gam function used thereafter does not proceed
+# when the categorical data to be ploted is in the middle of the matrix model
+Xgam2 = np.column_stack([age, Wage['jobclass'].cat.codes, Wage['maritl'].cat.codes])
+gam_full = gam_full.fit(Xgam2, y)
+```
+
+```{python}
+#Effect of maritl in the full model on the wage
+fig, ax = subplots(figsize=(12, 12))
+ax=plot_gam(gam_full,2)
+ax.set_xlabel('Marital status')
+ax.set_ylabel('Effect on wage')
+ax.set_title('Partial dependence of wage on marital status',fontsize=20);
+ax.set_xticklabels(Wage['maritl'].cat.categories, fontsize=8);
+```
+
+We notice that the max effect on wage is obtained when the marital status is married followed by never married category. Other categories of marital satuts seem to have a positive effect on wage too, but this effect remains low.
+
+```{python}
+#Effect of jobclass in the full model on the wage
+fig, ax = subplots(figsize=(8, 8))
+ax=plot_gam(gam_full,1)
+ax.set_xlabel('Job class')
+ax.set_ylabel('Effect on wage')
+ax.set_title('Partial dependence of wage on job class',fontsize=20);
+ax.set_xticklabels(Wage['jobclass'].cat.categories, fontsize=8);
+```
+
+As predicted the effect of infomation jobs on wage is more important than the effect of industrial jobs.
+
+## Exercise 8
+
+```{python}
+Auto=load_data('Auto')
+horsepower=Auto['horsepower']
+mpg=Auto['mpg']
+```
+
+```{python}
+pd.plotting.scatter_matrix(Auto, figsize=(12,12), marker = 'o', 
+                           hist_kwds = {'bins': 10}, s = 15, alpha = 0.5);
+```
+
+In the book we analyse the behavior of mpg depending on other features. Let's just analyze the same feature as an output.
+
+```{python}
+Auto.corr()
+```
+
+By looking at the correlation matrix and the previous pairplot, it is predictible that mpg has non linear relationships with cylinders, displacement, horsepower and weight.
+
+Features seem to be highly correlated. Modelization with one predictible variable sounds a wise choice. For this we will try to regress mpg on horsepower as the previous chapters of the book did.
+
+```{python}
+# For the polynomial regression we search the optimal degree with cross validation cv=5
+cv_error = np.zeros(11)
+Hm = np.array(horsepower)
+M = sklearn_sm(sm.OLS)
+#Let's introduce splits. 
+cv = KFold(n_splits=5,shuffle=True,random_state=0)
+for i, d in enumerate(range(1,12)):
+    Xcrossm = np.power.outer(Hm, np.arange(d+1))
+    Mat_CV = cross_validate(M,Xcrossm,mpg,cv=cv)
+    cv_error[i] = np.mean(Mat_CV['test_score'])
+cv_error
+```
+
+The cross validation error is minimal where the polynomial degree equals 7.
+
+```{python}
+# define a grid of 100 points over which we can compute model predictions 
+horse_grid = np.linspace(horsepower.min(), horsepower.max(), 100)
+horse_df=pd.DataFrame({'horsepower':horse_grid})
+```
+
+```{python}
+def plot_mpg_fit(horse_df, basis, title):
+    """ Function which returns the plot of the fitted polynomial model"""
+    X1 = basis.transform(Auto)
+    Xnew1 = basis.transform(horse_df)
+    M = sm.OLS(mpg, X1).fit()
+    preds = M.get_prediction(Xnew1)
+    bands = preds.conf_int(alpha=0.05)
+    fig, ax = subplots(figsize=(8,8))
+    ax.scatter(horsepower,mpg,facecolor='gray',alpha=0.5)
+    for val, ls in zip([preds.predicted_mean,bands[:,0],bands[:,1]],['b','r--','r--']):
+        ax.plot(horse_df.values, val, ls, linewidth=3)
+    ax.set_title(title, fontsize=20)
+    ax.set_xlabel('Horsepower', fontsize=20)
+    ax.set_ylabel('mpg', fontsize=20);
+    return ax
+```
+
+```{python}
+model7=MS([poly('horsepower', degree=7)]).fit(Auto)
+plot_mpg_fit(horse_df, model7, '7 degree polynomial');
+```
+
+```{python}
+X1 = model7.transform(Auto)
+M = sm.OLS(mpg, X1).fit()
+summarize(M)
+```
+
+We notice that pvalue of degree 7 is not sigificant and the graph is wiggly. This implies that the best polynomial model has 6 degrees, which means that we have to refit the model using the same approach as above.
+
+```{python}
+# Step function model. First, let's try to find the optimal number of cuts
+#We'll use for that cross validation approach
+cv_error_cuts = np.zeros(20)
+for i, d in enumerate(range(1,21)):
+    Xcross = pd.qcut(horsepower, d+1)
+    M_CV_cut = cross_validate(sklearn_sm(sm.OLS),pd.get_dummies(Xcross),mpg,cv=cv)
+    cv_error_cuts[i] = np.mean(M_CV_cut['test_score'])
+cv_error_cuts
+```
+
+We deduce from the minimum cross validation error that the best number of cuts is 10.
+
+```{python}
+n_cuts=10
+cut_horse = pd.qcut(horsepower, n_cuts+1)
+# Get dummy features relatively to horsepower groups
+dummy_horse=pd.get_dummies(cut_horse)
+#Create a new data frame to fit the new model
+dfh_step=pd.concat([dummy_horse, mpg], axis=1)
+# Assign roles to each of the columns of the new data set and ft the model
+Xnewh=dfh_step.iloc[:,:-1]
+ynewh=dfh_step.iloc[:,-1]
+ynewhnp=np.array(ynewh)[:,np.newaxis]
+modelh_step=MS(Xnewh,intercept=False).fit(dfh_step)
+Xh=modelh_step.transform(dfh_step)
+resh=sm.OLS(ynewhnp,Xh).fit()
+#Define a gird over which we can plot predictions
+Xh_grid=np.linspace(horsepower.min(),horsepower.max())
+#Now let's cut the defined grid over the predifined groups. We use the cut function to create an
+# ordered set of values
+groupsh = pd.cut(Xh_grid, n_cuts+1)
+dummiesh = pd.get_dummies(groupsh)
+# Plot the step function 
+yh_step = resh.predict(dummiesh)
+fig, ax = subplots(figsize=(8,8))
+plt.scatter(horsepower,mpg)
+plt.plot(Xh_grid, yh_step,'-r')
+ax.set_title('Step function', fontsize=20)
+ax.set_xlabel('Horsepower', fontsize=20)
+ax.set_ylabel('mpg', fontsize=20);
+```
+
+```{python}
+summarize(resh)
+```
+
+Obviously the step function looks wiggly. The polynomial regression seems to fit better the training model. 
+
+```{python}
+#Natural cubic spline model. We could have used cross validation to determine the degrees of freedom.
+# But we assume here, as it is often the case, that there must be 6 since a cubic spline implies 
+# 4 degrees along with 2 more constraints to add at the ends.
+ns_horse = MS([ns('horsepower', df=6)]).fit(Auto)
+M_nsh = sm.OLS(mpg, ns_horse.transform(Auto)).fit()
+summarize(M_nsh)
+```
+
+```{python}
+plot_mpg_fit(horse_df, ns_horse,'Natural spline, df=6');
+```
+
+All the coefficients are significant and the confidence intervals plots at the ends look stable.
+
+## Exercise 9
+
+```{python}
+Boston=load_data('Boston')
+dis=Boston['dis']
+nox=Boston['nox']
+```
+
+### (a)
+
+```{python}
+model3=MS([poly('dis', degree=3)]).fit(Boston)
+X=model3.transform(Boston)
+res=sm.OLS(nox, X).fit()
+```
+
+```{python}
+summarize(res)
+```
+
+```{python}
+#Define the grid of predictor values
+dis_grid = np.linspace(dis.min(), dis.max(), 100)
+dis_df=pd.DataFrame({'dis':dis_grid})
+dis2_df=pd.DataFrame({'dis':dis})
+#Plot the results
+Xnew2=model3.transform(dis_df)
+preds = res.get_prediction(Xnew2)
+bands = preds.conf_int(alpha=0.05)
+fig, ax = subplots(figsize=(8,8))
+ax.scatter(dis,nox,facecolor='gray',alpha=0.5)
+for val, ls in zip([preds.predicted_mean,bands[:,0],bands[:,1]],['b','r--','r--']):
+        ax.plot(dis_df.values, val, ls, linewidth=3)
+ax.set_title('Cubic polynomial regression of nox on dis', fontsize=20)
+ax.set_xlabel('dis', fontsize=20)
+ax.set_ylabel('nox', fontsize=20);
+```
+
+```{python}
+preds=preds.predicted_mean.reshape(-1,1)
+preds.shape
+```
+
+### (b)
+
+```{python}
+RSS={}
+for d in range(1,11):
+    model=MS([poly('dis', degree=d)]).fit(Boston)
+    X=model.transform(Boston)
+    res=sm.OLS(nox, X).fit()
+    Xnew=model.transform(dis_df)
+    Xnew2=model.transform(dis2_df)
+    preds = res.get_prediction(Xnew)
+    yhat=res.get_prediction(Xnew2)
+    yhat=yhat.predicted_mean
+    RSS[d]=np.sum((nox - yhat)**2)
+    fig, ax = subplots(figsize=(8,8))
+    ax.scatter(dis,nox,facecolor='gray',alpha=0.5)
+    ax.plot(dis_df.values,preds.predicted_mean , 'b', linewidth=3)
+    ax.set_title('Polynomial regression of nox on dis with degree='+ str(d), fontsize=20)
+    ax.set_xlabel('dis', fontsize=20)
+    ax.set_ylabel('nox', fontsize=20);
+
+```
+
+```{python}
+pd.DataFrame(RSS,index = ['RSS']).T
+```
+
+As expected, the training RSE decreases with the polynomial degree.
+
+### (c)
+
+```{python}
+# Using cross validation to find the best polynomial degree. cv=5
+cv_error = np.zeros(11)
+H = np.array(dis)
+M = sklearn_sm(sm.OLS)
+#Let's introduce splits. 
+cv = KFold(n_splits=5,shuffle=True,random_state=0)
+for i, d in enumerate(range(1,12)):
+    Xcross = np.power.outer(H, np.arange(d+1))
+    Mat_CV = cross_validate(M,Xcross,nox,cv=cv)
+    cv_error[i] = np.mean(Mat_CV['test_score'])
+cv_error
+```
+
+The optimal polynomial regression is obtained for 3 degrees.
+
+### (d)
+
+```{python}
+bs_dis = MS([bs('dis', df=4)]).fit(Boston)
+M_bs = sm.OLS(nox, bs_dis.transform(Boston)).fit()
+summarize(M_bs)
+```
+
+```{python}
+X = bs_dis.transform(Boston)
+Xnew = bs_dis.transform(dis_df)
+M = sm.OLS(nox, X).fit()
+preds = M.get_prediction(Xnew)
+bands = preds.conf_int(alpha=0.05)
+fig, ax = subplots(figsize=(8,8))
+ax.scatter(dis,nox,facecolor='gray',alpha=0.5)
+for val, ls in zip([preds.predicted_mean,bands[:,0],bands[:,1]],['b','r--','r--']):
+        ax.plot(dis_df.values, val, ls, linewidth=3)
+ax.set_title('Regression spline fit of nox on dis with 4 df', fontsize=20)
+ax.set_xlabel('dis', fontsize=20)
+ax.set_ylabel('nox', fontsize=20);
+```
+
+The knots were automatically chosen as the four quartiles.
+
+### (e)
+
+```{python}
+RSS={}
+for d in range(3,11):
+    bs_dis = MS([bs('dis', df=d)]).fit(Boston)
+    M_bs = sm.OLS(nox, bs_dis.transform(Boston)).fit()
+    Xnew = bs_dis.transform(dis_df)
+    Xnew2=bs_dis.transform(dis2_df)
+    preds = M_bs.get_prediction(Xnew)
+    yhat=M_bs.get_prediction(Xnew2)
+    yhat=yhat.predicted_mean
+    RSS[d]=np.sum((nox - yhat)**2)
+    bands = preds.conf_int(alpha=0.05)
+    fig, ax = subplots(figsize=(8,8))
+    ax.scatter(dis,nox,facecolor='gray',alpha=0.5)
+    ax.plot(dis_df.values, preds.predicted_mean, 'b', linewidth=3)
+    ax.set_title('Regression spline fit of nox on dis with df='+str(d), fontsize=20)
+    ax.set_xlabel('dis', fontsize=20)
+    ax.set_ylabel('nox', fontsize=20);
+```
+
+```{python}
+pd.DataFrame(RSS,index = ['RSS']).T
+```
+
+The training RSS decreases with degrees of freedom. We cannot decide which is the best regression spline model.
+
+### (f)
+
+```{python}
+# Using cross validation to find the best regression spline model. cv=10
+cv_error = np.zeros(9)
+M = sklearn_sm(sm.OLS)
+cv = KFold(n_splits=10,shuffle=True,random_state=1)
+for d in range(3,12):
+    bs_dis = MS([bs('dis', df=d)]).fit(Boston)
+    Xcross = bs_dis.transform(Boston)
+    Mat_CV = cross_validate(M,Xcross,nox,cv=cv)
+    cv_error[d-3] = np.mean(Mat_CV['test_score'])
+cv_error
+```
+
+The optimal model is obtained for 5 degrees of freedom but results seem unstable. Another approach like ANOVA can be more useful to spot the best model.
+
+## Exercise 10
+
+```{python}
+College=load_data('College')
+```
+
+### (a)
+
+```{python}
+College_train, College_valid = train_test_split(College, test_size=0.5, random_state=0)
+```
+
+```{python}
+College['Private']=College['Private'].astype('category')
+College_train['Private']=College_train['Private'].astype('category')
+College_valid['Private']=College_valid['Private'].astype('category')
+y=College_train['Outstate']
+Vars_train = College_train.columns.drop(['Outstate'])
+design=MS(Vars_train).fit(College_train)
+X_train=design.transform(College_train)
+College_train.info()
+```
+
+```{python}
+# Define the scoring system based on Cp coefficient
+def nCp(sigma2, estimator, X, Y):
+    "Negative Cp statistic"
+    n, p = X.shape
+    Yhat = estimator.predict(X)
+    RSS = np.sum((Y - Yhat)**2)
+    return -(RSS + 2 * p * sigma2) / n 
+design_sigma = MS(College.columns.drop('Outstate')).fit(College)
+Y_sigma = np.array(College['Outstate'])
+X_sigma = design_sigma.transform(College)
+sigma2 = OLS(Y_sigma,X_sigma).fit().scale
+neg_Cp = partial(nCp, sigma2)
+```
+
+```{python}
+strategy=Stepwise.first_peak(design,direction='forward',max_terms=len(design.terms))
+Outstate_MSE = sklearn_selected(OLS,strategy,scoring=neg_Cp)
+Outstate_MSE.fit(College_train, y)
+Outstate_MSE.selected_state_
+```
+
+The optimization of Cp coefficient shows that the best model obtained by forward stepwise selection relies on 10 predictors.
+
+### (b)
+
+```{python}
+gam = LinearGAM(s_gam(0)+ s_gam(1)+s_gam(2)+s_gam(3)+s_gam(4)+ f_gam(5, lam=0) 
+                +s_gam(6)+s_gam(7)+s_gam(8)+s_gam(9))
+Xgam = np.column_stack([College_train['Accept'],College_train['Expend'],College_train['F.Undergrad'],College_train['Grad.Rate'],
+                        College_train['Personal'], College_train['Private'].cat.codes,College_train['Room.Board'],
+                        College_train['Terminal'],College_train['Top10perc'],College_train['perc.alumni']])
+gam = gam.fit(Xgam, y)
+```
+
+```{python}
+for d in Outstate_MSE.selected_state_:
+    i=Outstate_MSE.selected_state_.index(d)
+    fig, ax = subplots(figsize=(8, 8))
+    ax = plot_gam(gam, i)
+    ax.set_xlabel(d)
+    ax.set_ylabel('Effect on Outstate tuition')
+    ax.set_title('Partial dependence of Outstate tuition on '+d,fontsize=20);
+```
+
+Some of the graphs represented above display wiggly splines (e.g Outstate tuition on Terminal) which puts the gam model considered before into question.
+In order to select the best GAM model we should consider the aformentionned cases and alternate between linear spline choices.
+The comparison of obtained models can be done using ANOVA
+
+We choose to experiment with the following features due the roughness of their splines shown on the previous graphs: 'perc.alumni', 'Room.Board' and 'Grad.Rate'.
+
+```{python}
+gam2 = LinearGAM(s_gam(0)+ s_gam(1)+s_gam(2)+l_gam(3)+s_gam(4)+ f_gam(5, lam=0) 
+                +l_gam(6)+s_gam(7)+s_gam(8)+l_gam(9))
+gam2 = gam2.fit(Xgam, y)
+anova_gam(gam2,gam)
+```
+
+The above table shows that 'gam' model is no better than the second. Hence gam2 is adopted for the rest of the exercise.
+
+### (c)
+
+```{python}
+y_test=College_valid['Outstate']
+#vars_test=College_valid.columns.drop(['Outstate'])
+#design_test=MS(vars_test).fit(College_valid)
+#X_test=design.transform(College_valid)
+X_test = np.column_stack([College_valid['Accept'],College_valid['Expend'],
+                          College_valid['F.Undergrad'],College_valid['Grad.Rate'],
+                        College_valid['Personal'], 
+                          College_valid['Private'].cat.codes,College_valid['Room.Board'],
+                        College_valid['Terminal'],College_valid['Top10perc'],
+                          College_valid['perc.alumni']])
+```
+
+```{python}
+test_preds=gam2.predict(X_test)
+r2_score(y_test,test_preds)
+```
+
+The $R^2$ metric is nearly 80%, which is a sign of good fit.
+
+### (d)
+
+```{python}
+gam.summary()
+```
+
+```{python}
+gam2.summary()
+```
+
+Using stepwise forward selection was a bad idea. The number of observations seem insufficient to bring stable results. Splitting the already small dataset made things worse (Steyerberg et al. show that there must be at least 50 observations per feature to have acceptable results using stepwise selection. See : Prognostic modeling with logistic regression analysis: in search of a sensible strategy in small data sets. ). pvalues don't reflect the correct values and hence are not reliable. In a more realistic case we should avoid stepwise selection and opt for other approaches for feature selection like ridge regression.
+
+## Exercise 11
+
+### (a)
+
+```{python}
+n=100
+np.random.seed(12)
+X1=np.random.randn(n)
+X2=np.random.randn(n)
+epsilon=np.random.randn(n)
+beta=[0.5,1,1.5]
+Y=beta[0]+beta[1]*X1+beta[2]*X2+epsilon
+```
+
+### (b)
+
+```{python}
+def simple_reg(outcome,feature):
+    df=pd.DataFrame({'outcome':outcome,'feature':feature})
+    design=MS(['feature'])
+    X=design.fit_transform(df)
+    model=sm.OLS(outcome,X)
+    result=model.fit()
+    return result.params[0],result.params[1]
+```
+
+### (c)
+
+```{python}
+beta1=7
+```
+
+### (d)
+
+```{python}
+beta0=simple_reg(Y-beta1*X1,X2)[0]
+beta2=simple_reg(Y-beta1*X1,X2)[1]
+```
+
+### (e)
+
+```{python}
+beta0=simple_reg(Y-beta2*X2,X1)[0]
+beta1=simple_reg(Y-beta2*X2,X1)[1]
+```
+
+### (f)
+
+For more accuracy we should rename betas found in both questions d and e by betahat in order to distinguish theme from real betas chosen in the beginning of the exercise
+
+```{python}
+betahat=[beta0,beta1,beta2]
+list_beta0=[betahat[0]]
+list_beta1=[betahat[1]]
+list_beta2=[betahat[2]]
+for i in range(1000):
+    list_beta2.append(simple_reg(Y-list_beta1[i]*X1,X2)[1])
+    list_beta0.append(simple_reg(Y-list_beta2[i]*X2,X1)[0])
+    list_beta1.append(simple_reg(Y-list_beta2[i]*X2,X1)[1])
+betahat=[list_beta0[-1],list_beta1[-1],list_beta2[-1]]
+```
+
+```{python}
+betahat
+```
+
+```{python}
+plt.plot(np.arange(1,1002),list_beta0,label = 'Beta0')
+plt.plot(np.arange(1,1002),list_beta1,label = 'Beta1')
+plt.plot(np.arange(1,1002),list_beta2,label = 'Beta2')
+plt.legend()
+plt.xlabel('Number of iterations');
+```
+
+### (g)
+
+```{python}
+df=pd.DataFrame({'y':Y,'X1':X1,'X2':X2})
+X = MS(['X1', 'X2']).fit_transform(df)
+model = sm.OLS(Y, X)
+results = model.fit()
+summarize(results)
+```
+
+Both methods used in questions g and f yield the same results. As for Betahat, we notice that they are close to the real coefficients defined in question a.
+
+### (h)
+
+We can limlit the x axis of the previous graph to visualize after the number of iterations after which the coefficients converge.
+
+```{python}
+plt.plot(np.arange(1,1002),list_beta0,label = 'Beta0')
+plt.plot(np.arange(1,1002),list_beta1,label = 'Beta1')
+plt.plot(np.arange(1,1002),list_beta2,label = 'Beta2')
+plt.legend()
+plt.xlabel('Number of iterations')
+plt.xlim(0,10);
+```
+
+After only 3 iterations, obtained results for the coefficients become stable.
+
+## Exercise 12
+
+```{python}
+np.random.seed(45)
+X=np.random.rand(100,100)
+c = np.random.randn(1)
+beta=np.random.randn(100)
+epsilon=np.random.randn(100)
+Y=c+np.matmul(X,beta)+epsilon
+```
+
+```{python}
+lm= LinearRegression()
+(Y).shape
+```
+
+```{python}
+Xn=np.delete(X,1,1)
+df=pd.DataFrame(X, columns = ['Column_'+str(i) for i in range(100)])
+```
+
+```{python}
+mul_beta_hat=np.zeros(100)#beta estimators obtained by multiple linear regression
+design = MS(df).fit_transform(df)
+result = sm.OLS(Y, design).fit()
+for j in range(100):
+    mul_beta_hat[j]=result.params[1:].values[j]
+```
+
+```{python}
+ mul_beta_hat.shape
+```
+
+```{python}
+n_iter=100#number of iterations
+mse=np.zeros(n_iter)#mean squared error of the backfitted linear regression
+diff_mse=np.zeros(n_iter)#mean squared error among betas obtained by backfit and betas obtained by
+#multiple linear regression
+c_hat=np.zeros((n_iter,100))#intercept estimators obtained by backfit
+beta_hat=np.zeros((n_iter,100))#beta estimators obtained by backfit
+for j in range(n_iter):
+    for i in range(100):
+        beta_hat_i=np.delete(beta_hat[j,:],i,0)
+        term=np.matmul(np.concatenate((X[:,:i], X[:,i+1:]), axis=1),beta_hat_i)
+        c_hat[j:n_iter,i]=lm.fit(X[:,i].reshape(-1,1),Y-term).intercept_
+        beta_hat[j:n_iter,i]=lm.fit(X[:,i].reshape(-1,1),Y-term).coef_[0]
+    mse[j]=mean_squared_error(Y, c_hat[j,i]+np.matmul(X,beta_hat[j,:]))
+    diff_mse[j]=mean_squared_error(mul_beta_hat,beta_hat[j,:])
+```
+
+```{python}
+ax=subplots(figsize=(20,20))[1]
+ax.scatter(range(1,n_iter+1), mse)
+ax.set_xlabel('Nth iteration')
+ax.set_title('Backfitting MSE for Y') 
+ax.set_ylabel(' MSE ') ;
+```
+
+```{python}
+ax=subplots(figsize=(20,20))[1]
+ax.scatter(range(1,n_iter+1), diff_mse)
+ax.set_xlabel('Nth iteration')
+ax.set_title('MLR beats vs Backfitting betas') 
+ax.set_ylabel(' MSE ') ;
+```
+
+After 20 iterations mean square errors differences are with the last iteration are considered negligeable.

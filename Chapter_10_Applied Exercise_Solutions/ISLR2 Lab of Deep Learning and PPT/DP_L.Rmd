@@ -1,0 +1,1381 @@
+---
+title: "Deep Learning: An Introduction"
+subtitle: "Chapter 10 - Key Concepts & Applications"
+author: "Your Name"
+date: "December 22, 2025"
+output:
+  xaringan::moon_reader:
+    css: [default, default-fonts, custom.css]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: '16:9'
+      beforeInit: "https://platform.twitter.com/widgets.js"
+    self_contained: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 5.5,
+  fig.align = 'center',
+  cache = FALSE,
+  code_folding = TRUE,
+  class.output = "output-small"
+)
+
+# Load libraries quietly
+suppressPackageStartupMessages({
+  library(torch)
+  library(luz)
+  library(ISLR2)
+  library(glmnet)
+  library(keras3)
+})
+
+# Custom function to format numbers without dollar sign
+format_mae <- function(x) {
+  sprintf("%.2f", x)
+}
+
+format_rmse <- function(x) {
+  sprintf("%.2f", x)
+}
+```
+
+class: inverse, center, middle
+
+# Outline
+
+1. Introduction to Deep Learning
+2. What is Deep Learning?
+3. Single Layer Neural Network
+4. Multilayer Neural Networks
+5. Convolutional Neural Networks (CNNs)
+6. Recurrent Neural Networks (RNNs)
+7. Practical Implementation (Sections 1-5)
+8. Conclusion
+
+---
+
+# What is Deep Learning?
+
+Deep learning is a subset of machine learning that mimics how humans learn.
+
+**Key Characteristics:**
+- Uses neural networks to identify patterns and make predictions
+- Applied in image classification, speech recognition, and forecasting
+- Revolutionizing AI with applications across industries
+
+**Why Deep Learning?**
+- Handles complex, high-dimensional data
+- Learns hierarchical representations automatically
+- Achieves state-of-the-art performance in many domains
+
+---
+
+# Single Layer Neural Network
+
+A neural network learns to make predictions by combining inputs through a hidden layer.
+
+**Architecture:**
+- Input layer: Raw features
+- Hidden layer: Non-linear transformations
+- Output layer: Predictions
+
+**How it Works:**
+The output depends on the activations in the hidden layer, calculated using activation functions (e.g., ReLU, sigmoid).
+
+**Economic Example:** 
+Predicting loan approval based on applicant features (income, credit score).
+
+---
+
+# Multilayer Neural Networks
+
+Multiple hidden layers allow the network to learn more complex patterns.
+
+**Advantages:**
+- Captures non-linear relationships
+- Learns hierarchical features
+- Improves prediction accuracy
+
+**Architecture:**
+- Input → Hidden Layer 1 → Hidden Layer 2 → ... → Output
+- Each layer learns progressively abstract features
+
+**Economic Example:** 
+Forecasting stock prices based on multiple market indicators.
+
+---
+
+# Convolutional Neural Networks (CNNs)
+
+CNNs are specialized for tasks involving images and spatial data.
+
+**Key Features:**
+- Convolutional layers detect local patterns (edges, textures)
+- Pooling layers reduce dimensionality
+- Fully connected layers make final predictions
+
+**How CNNs Work:**
+They use filters to scan images and identify features at different scales.
+
+**Economic Example:** 
+Product image classification in online retail for automated inventory management.
+
+---
+
+# Recurrent Neural Networks (RNNs)
+
+RNNs are designed for sequential data like text or time series.
+
+**Special Property:**
+They maintain memory of previous inputs, making them ideal for:
+- Language translation
+- Speech recognition
+- Time series forecasting
+
+**Architecture:**
+- Recurrent connections allow information to persist
+- Hidden state captures sequence context
+
+**Economic Example:** 
+Predicting economic trends based on historical data, such as GDP growth or inflation rates.
+
+---
+
+# Deep Learning Applications in Economics
+
+Deep learning transforms economic analysis and decision-making:
+
+**Financial Applications:**
+- Stock market predictions
+- Loan approval automation
+- Fraud detection systems
+
+**Economic Forecasting:**
+- Inflation prediction
+- GDP growth estimation
+- Market crash early warning systems
+
+**Other Applications:**
+- Financial news sentiment classification
+- Trading strategy optimization
+- Credit risk assessment
+
+---
+
+class: inverse, center, middle
+
+# Section 1: Single Layer Neural Network
+## Hitters Salary Prediction
+
+---
+
+# Section 1: Problem Setup
+
+**Task:** Predict baseball player salaries based on performance statistics
+
+**Dataset:** Hitters from ISLR2 package
+- 263 observations (after removing missing values)
+- 19 predictor variables (batting stats, years played, etc.)
+- Target: Salary (in thousands of dollars)
+
+**Models to Compare:**
+1. Linear Regression (baseline)
+2. Lasso Regression (L1 regularization)
+3. Single Layer Neural Network (50 hidden units)
+
+---
+
+# Section 1: Data Preparation
+
+.pull-left[
+```{r hitters-data, echo=TRUE, class.source = 'fold-show'}
+# Load and prepare data
+Gitters <- na.omit(Hitters)
+n <- nrow(Gitters)
+set.seed(13)
+ntest <- trunc(n / 3)
+testid <- sample(1:n, ntest)
+```
+]
+
+.pull-right[
+```{r hitters-data-output, echo=FALSE}
+cat("Total observations:", n, "\n")
+cat("Training samples:", n - ntest, "\n")
+cat("Test samples:", ntest, "\n")
+cat("Predictors:", ncol(Gitters) - 1)
+```
+]
+
+---
+
+# Section 1: Linear Regression Baseline
+
+<details>
+<summary>Click to show/hide code</summary>
+
+```{r hitters-linear, echo=TRUE}
+# Fit standard linear model
+lfit <- lm(Salary ~ ., data = Gitters[-testid, ])
+lpred <- predict(lfit, Gitters[testid, ])
+mae_lm <- with(Gitters[testid, ], mean(abs(lpred - Salary)))
+```
+</details>
+
+**Results:**
+```{r hitters-linear-result, echo=FALSE}
+cat("Linear Regression MAE:", format_mae(mae_lm), "\n")
+cat("Mean predicted salary:", format_mae(mean(Gitters[testid, "Salary"])))
+
+```
+
+**Interpretation:** Linear regressions predicted 
+
+---
+
+# Section 1: Lasso Regression
+
+<details>
+<summary>Click to show/hide code</summary>
+
+```{r hitters-lasso, echo=TRUE}
+# Prepare data and fit Lasso
+x <- scale(model.matrix(Salary ~ . - 1, data = Gitters))
+y <- Gitters$Salary
+cvfit <- cv.glmnet(x[-testid, ], y[-testid], type.measure = "mae")
+cpred <- predict(cvfit, x[testid, ], s = "lambda.min")
+mae_lasso <- mean(abs(y[testid] - cpred))
+```
+</details>
+
+**Results:**
+```{r hitters-lasso-result, echo=FALSE}
+cat("Lasso Regression MAE:", format_mae(mae_lasso), "k\n")
+cat("Optimal lambda:", round(cvfit$lambda.min, 4))
+```
+
+**Note:** Lasso performs automatic feature selection through L1 regularization
+
+---
+
+# Section 1: Neural Network
+
+<details>
+<summary>Click to show/hide code</summary>
+
+```{r hitters-nn, echo=TRUE, results='hide'}
+# Convert to torch tensors
+x_train_t <- torch_tensor(x[-testid, ], dtype = torch_float32())
+y_train_t <- torch_tensor(y[-testid], dtype = torch_float32())$view(c(-1, 1))
+x_test_t <- torch_tensor(x[testid, ], dtype = torch_float32())
+y_test_t <- torch_tensor(y[testid], dtype = torch_float32())$view(c(-1, 1))
+
+# Define neural network
+nn_model <- nn_module(
+  "NNRegressor",
+  initialize = function(input_size) {
+    self$fc1 <- nn_linear(input_size, 50)
+    self$dropout <- nn_dropout(0.4)
+    self$fc2 <- nn_linear(50, 1)
+  },
+  forward = function(x) {
+    x %>% self$fc1() %>% nnf_relu() %>% self$dropout() %>% self$fc2()
+  }
+)
+
+# Train the model
+fitted_model <- nn_model %>%
+  setup(loss = nn_mse_loss(), optimizer = optim_rmsprop,
+        metrics = list(mae = luz_metric_mae())) %>%
+  set_hparams(input_size = ncol(x)) %>%
+  set_opt_hparams(lr = 0.001) %>%
+  fit(tensor_dataset(x_train_t, y_train_t), epochs = 100,
+      valid_data = tensor_dataset(x_test_t, y_test_t),
+      dataloader_options = list(batch_size = 32), verbose = FALSE)
+
+npred <- predict(fitted_model, x_test_t)
+mae_nn <- mean(abs(as.numeric(npred) - y[testid]))
+```
+</details>
+
+**Results:**
+```{r hitters-nn-result, echo=FALSE}
+cat("Neural Network MAE:", format_mae(mae_nn), "k")
+```
+
+---
+
+# Section 1: Results Comparison
+
+```{r hitters-plot, echo=FALSE, fig.height=5.5}
+par(mar = c(5, 5, 4, 2))
+
+models <- c("Linear\nRegression", "Lasso\nRegression", "Neural\nNetwork")
+maes <- c(mae_lm, mae_lasso, mae_nn)
+colors <- c("#64B5F6", "#66BB6A", "#EF5350")
+
+bp <- barplot(maes, 
+              names.arg = models,
+              main = "Hitters Salary Prediction: Model Comparison",
+              ylab = "Mean Absolute Error (thousands)",
+              col = colors, border = NA,
+              ylim = c(0, max(maes) * 1.3),
+              cex.names = 1.2, cex.axis = 1.1, cex.lab = 1.2)
+
+text(bp, maes + max(maes) * 0.06, 
+     sprintf("%.1f", maes), cex = 1.3, font = 2)
+
+grid(nx = NA, ny = NULL, col = "gray90", lty = 1)
+
+best_idx <- which.min(maes)
+points(bp[best_idx], maes[best_idx] * 0.85, pch = 8, col = "gold", cex = 3.5)
+
+if (maes[2] < maes[1]) {
+  segments(bp[1], maes[1] - 5, bp[2], maes[2] + 5, col = "#2E7D32", lwd = 2.5, lty = 2)
+  text(mean(bp[1:2]), mean(maes[1:2]),
+       sprintf("%.1f%% better", (1 - maes[2]/maes[1]) * 100),
+       col = "#2E7D32", font = 2, cex = 1, pos = 3)
+}
+
+mtext("Lower MAE = Better predictions", side = 1, line = 4, cex = 0.9, col = "gray40")
+```
+
+---
+
+# Section 1: Summary Table
+
+```{r hitters-table, echo=FALSE}
+hitters_summary <- data.frame(
+  Model = c("Linear Regression", "Lasso Regression", "Neural Network"),
+  MAE = sprintf("%.2f", maes),
+  RMSE = sprintf("%.2f", sqrt(c(
+    mean((lpred - Gitters[testid, "Salary"])^2),
+    mean((cpred - y[testid])^2),
+    mean((as.numeric(npred) - y[testid])^2)
+  ))),
+  Parameters = c(
+    paste(ncol(Gitters), "coefficients"),
+    sprintf("%d coefficients", sum(coef(cvfit, s = "lambda.min") != 0)),
+    "~1,000"
+  ),
+  Regularization = c("None", "L1 (Lasso)", "Dropout (0.4)")
+)
+
+knitr::kable(hitters_summary,
+             align = c("l", "r", "r", "r", "l"),
+             caption = "Section 1: Hitters Salary Prediction Summary (values in thousands)")
+```
+
+**Winner:** Lasso Regression achieves the best performance through effective feature selection.
+
+---
+
+class: inverse, center, middle
+
+# Section 2: Multilayer Neural Network
+## MNIST Digit Classification
+
+---
+
+# Section 2: Problem Setup
+
+**Task:** Classify handwritten digits (0-9) from images
+
+**Dataset:** MNIST
+- 60,000 training images
+- 10,000 test images
+- 28×28 pixel grayscale images (784 features)
+- 10 classes (digits 0-9)
+
+**Models to Compare:**
+1. Logistic Regression (baseline)
+2. Deep Neural Network (3 hidden layers)
+
+---
+
+# Section 2: Load MNIST Data
+
+<details>
+<summary>Click to show/hide code</summary>
+
+```{r mnist-data, echo=TRUE}
+# Load MNIST dataset
+mnist_data <- dataset_mnist()
+
+# Flatten images and normalize
+x_train <- array(mnist_data$train$x, 
+                 dim = c(nrow(mnist_data$train$x), 784)) / 255
+y_train <- mnist_data$train$y
+x_test <- array(mnist_data$test$x, 
+                dim = c(nrow(mnist_data$test$x), 784)) / 255
+y_test <- mnist_data$test$y
+```
+</details>
+
+**Data Summary:**
+```{r mnist-data-output, echo=FALSE}
+cat("Training images:", nrow(x_train), "\n")
+cat("Test images:", nrow(x_test), "\n")
+cat("Image size: 28×28 =", ncol(x_train), "pixels\n")
+cat("Classes:", length(unique(y_train)))
+```
+
+---
+
+# Section 2: Prepare Torch Tensors
+
+```{r mnist-tensors, echo=TRUE}
+# Convert to torch tensors (add 1 for R's 1-based indexing)
+x_train_t <- torch_tensor(x_train, dtype = torch_float32())
+y_train_t <- torch_tensor(as.integer(y_train) + 1L, dtype = torch_long())
+x_test_t <- torch_tensor(x_test, dtype = torch_float32())
+y_test_t <- torch_tensor(as.integer(y_test) + 1L, dtype = torch_long())
+
+# Create datasets
+train_ds <- tensor_dataset(x_train_t, y_train_t)
+test_ds <- tensor_dataset(x_test_t, y_test_t)
+
+cat("Training samples:", length(train_ds), "\n")
+cat("Test samples:", length(test_ds))
+```
+
+---
+
+# Section 2: Logistic Regression Baseline
+
+```{r mnist-logistic, echo=TRUE, results='hide'}
+# Define logistic regression (single linear layer)
+mnist_lr <- nn_module(
+  "MNISTLogistic",
+  initialize = function() {
+    self$fc <- nn_linear(784, 10)  # Direct mapping to 10 classes
+  },
+  forward = function(x) {
+    self$fc(x)
+  }
+)
+
+# Train logistic regression
+fitted_lr <- mnist_lr %>%
+  setup(loss = nn_cross_entropy_loss(), 
+        optimizer = optim_adam,
+        metrics = list(accuracy = luz_metric_accuracy())) %>%
+  set_opt_hparams(lr = 0.001) %>%
+  fit(train_ds, epochs = 10, valid_data = test_ds,
+      dataloader_options = list(batch_size = 128), verbose = FALSE)
+
+# Calculate accuracy
+preds_lr <- predict(fitted_lr, test_ds)
+pred_class_lr <- torch_argmax(preds_lr, dim = 2)
+accuracy_lr <- as.numeric(torch_sum(pred_class_lr == y_test_t)) / length(y_test_t)
+```
+
+```{r mnist-lr-result, echo=FALSE}
+cat("Logistic Regression Accuracy:", round(accuracy_lr * 100, 2), "%")
+```
+
+---
+
+# Section 2: Deep Neural Network
+
+```{r mnist-deep, echo=TRUE, results='hide'}
+# Define deep network: 784 → 256 → 128 → 10
+mnist_nn <- nn_module(
+  "MNISTNet",
+  initialize = function() {
+    self$fc1 <- nn_linear(784, 256)
+    self$dropout1 <- nn_dropout(0.4)
+    self$fc2 <- nn_linear(256, 128)
+    self$dropout2 <- nn_dropout(0.3)
+    self$fc3 <- nn_linear(128, 10)
+  },
+  forward = function(x) {
+    x %>% 
+      self$fc1() %>% nnf_relu() %>% self$dropout1() %>%
+      self$fc2() %>% nnf_relu() %>% self$dropout2() %>% 
+      self$fc3()
+  }
+)
+
+# Train deep network
+fitted_mnist <- mnist_nn %>%
+  setup(loss = nn_cross_entropy_loss(), 
+        optimizer = optim_adam,
+        metrics = list(accuracy = luz_metric_accuracy())) %>%
+  set_opt_hparams(lr = 0.001) %>%
+  fit(train_ds, epochs = 10, valid_data = test_ds,
+      dataloader_options = list(batch_size = 128, shuffle = TRUE), 
+      verbose = FALSE)
+
+# Calculate accuracy
+preds <- predict(fitted_mnist, test_ds)
+pred_class <- torch_argmax(preds, dim = 2)
+accuracy_nn <- as.numeric(torch_sum(pred_class == y_test_t)) / length(y_test_t)
+```
+
+```{r mnist-nn-result, echo=FALSE}
+cat("Deep Neural Network Accuracy:", round(accuracy_nn * 100, 2), "%")
+```
+
+---
+
+# Section 2: Results Comparison
+
+```{r mnist-plot, echo=FALSE, fig.height=6}
+par(mar = c(5, 5, 4, 2))
+
+# Prepare data
+models <- c("Logistic\nRegression", "Deep Neural\nNetwork")
+accuracies <- c(accuracy_lr * 100, accuracy_nn * 100)
+colors <- c("#FFB74D", "#4CAF50")
+
+# Create barplot
+bp <- barplot(accuracies,
+              names.arg = models,
+              main = "MNIST Digit Classification: Model Comparison",
+              ylab = "Accuracy (%)",
+              col = colors,
+              border = NA,
+              ylim = c(0, 105),
+              cex.names = 1.2,
+              cex.axis = 1.1,
+              cex.lab = 1.2)
+
+# Add value labels
+text(bp, accuracies + 3,
+     sprintf("%.2f%%", accuracies),
+     cex = 1.3, font = 2)
+
+# Add grid
+grid(nx = NA, ny = NULL, col = "gray90", lty = 1)
+
+# Add improvement arrow
+arrows(bp[1], accuracies[1] + 5, bp[2], accuracies[2] - 5,
+       col = "#2E7D32", lwd = 3, length = 0.15)
+text(mean(bp), mean(accuracies),
+     sprintf("+%.2f%%", accuracies[2] - accuracies[1]),
+     col = "#2E7D32", font = 2, cex = 1.2)
+
+# Highlight best
+points(bp[2], accuracies[2] * 0.93,
+       pch = 8, col = "gold", cex = 3.5)
+
+# Add note
+mtext("10-class classification task", side = 1, line = 4,
+      cex = 0.9, col = "gray40")
+```
+
+---
+
+# Section 2: Summary Table
+
+```{r mnist-table, echo=FALSE}
+# Create summary table
+mnist_summary <- data.frame(
+  Model = c("Logistic Regression", "Deep Neural Network"),
+  Architecture = c("784 → 10", "784 → 256 → 128 → 10"),
+  Accuracy = sprintf("%.2f%%", accuracies),
+  Parameters = c("~7,850", "~235,146"),
+  Training_Time = c("~20 sec", "~60 sec"),
+  Epochs = c("10", "10")
+)
+
+knitr::kable(mnist_summary,
+             align = c("l", "l", "r", "r", "r", "r"),
+             caption = "Section 2: MNIST Classification Summary")
+```
+
+**Winner:** Deep Neural Network achieves higher accuracy through hierarchical feature learning.
+
+---
+
+class: inverse, center, middle
+
+# Section 3: Convolutional Neural Network
+## CIFAR100 Image Classification
+
+---
+
+# Section 3: Problem Setup
+
+**Task:** Classify color images into 100 different object categories
+
+**Dataset:** CIFAR100
+- 50,000 training images (using 5,000 for efficiency)
+- 10,000 test images (using 1,000 for efficiency)
+- 32×32 pixel RGB images
+- 100 classes (vehicles, animals, household items, etc.)
+
+**Challenge:** This is a much harder task than MNIST due to:
+- More classes (100 vs 10)
+- More complex images (objects vs digits)
+- Higher dimensional input (3,072 vs 784)
+
+---
+
+# Section 3: Load CIFAR100 Data
+
+```{r cifar-data, echo=TRUE}
+# Load CIFAR100 dataset
+cifar_data <- dataset_cifar100()
+
+# Use subset for computational efficiency
+x_train <- cifar_data$train$x[1:5000, , , ] / 255
+y_train <- cifar_data$train$y[1:5000]
+x_test <- cifar_data$test$x[1:1000, , , ] / 255
+y_test <- cifar_data$test$y[1:1000]
+
+cat("Training images:", dim(x_train)[1], "\n")
+cat("Test images:", dim(x_test)[1], "\n")
+cat("Image dimensions:", paste(dim(x_train)[2:4], collapse = "×"), "\n")
+cat("Number of classes:", length(unique(y_train)), "\n")
+cat("Total features:", 32 * 32 * 3, "(RGB pixels)")
+```
+
+---
+
+# Section 3: CNN Architecture
+
+```{r cifar-model, echo=TRUE}
+# Convert to torch tensors (channels-first: batch × channels × height × width)
+x_train_t <- torch_tensor(x_train, dtype = torch_float32())$permute(c(1, 4, 2, 3))
+y_train_t <- torch_tensor(as.integer(y_train) + 1L, dtype = torch_long())
+x_test_t <- torch_tensor(x_test, dtype = torch_float32())$permute(c(1, 4, 2, 3))
+y_test_t <- torch_tensor(as.integer(y_test) + 1L, dtype = torch_long())
+
+# Define CNN architecture
+cnn_model <- nn_module(
+  "CIFAR_CNN",
+  initialize = function() {
+    # First conv block: 3 → 16 channels
+    self$conv1 <- nn_conv2d(3, 16, kernel_size = 3, padding = 1)
+    self$pool1 <- nn_max_pool2d(2, 2)  # 32×32 → 16×16
+    
+    # Second conv block: 16 → 32 channels
+    self$conv2 <- nn_conv2d(16, 32, kernel_size = 3, padding = 1)
+    self$pool2 <- nn_max_pool2d(2, 2)  # 16×16 → 8×8
+    
+    # Fully connected layers
+    self$flatten <- nn_flatten()
+    self$dropout <- nn_dropout(0.3)
+    self$fc1 <- nn_linear(32 * 8 * 8, 128)
+    self$fc2 <- nn_linear(128, 100)
+  },
+  forward = function(x) {
+    x %>% 
+      self$conv1() %>% nnf_relu() %>% self$pool1() %>%
+      self$conv2() %>% nnf_relu() %>% self$pool2() %>%
+      self$flatten() %>% self$dropout() %>%
+      self$fc1() %>% nnf_relu() %>% self$fc2()
+  }
+)
+```
+
+---
+
+# Section 3: Train CNN
+
+```{r cifar-train, echo=TRUE, results='hide'}
+# Train the CNN
+fitted_cnn <- cnn_model %>%
+  setup(loss = nn_cross_entropy_loss(), 
+        optimizer = optim_adam,
+        metrics = list(accuracy = luz_metric_accuracy())) %>%
+  set_opt_hparams(lr = 0.001) %>%
+  fit(tensor_dataset(x_train_t, y_train_t),
+      epochs = 10,
+      valid_data = tensor_dataset(x_test_t, y_test_t),
+      dataloader_options = list(batch_size = 64, shuffle = TRUE, num_workers = 0),
+      verbose = FALSE)
+
+# Calculate test accuracy
+preds_cnn <- predict(fitted_cnn, tensor_dataset(x_test_t, y_test_t))
+pred_class_cnn <- torch_argmax(preds_cnn, dim = 2)
+accuracy_cnn <- as.numeric(torch_sum(pred_class_cnn == y_test_t)) / length(y_test_t)
+```
+
+```{r cifar-result, echo=FALSE}
+cat("CNN Test Accuracy:", round(accuracy_cnn * 100, 2), "%\n")
+cat("Random Baseline:", round(100/100, 2), "%\n")
+cat("Improvement Factor:", sprintf("%.1fx", accuracy_cnn * 100))
+```
+
+---
+
+# Section 3: CNN Results
+
+```{r cifar-plot, echo=FALSE, fig.height=6}
+par(mar = c(5, 5, 4, 2))
+
+# Prepare comparison
+models <- c("Random\nGuessing", "CNN\n(10 epochs)")
+accuracies <- c(1, accuracy_cnn * 100)
+colors <- c("#BDBDBD", "#AB47BC")
+
+# Create barplot
+bp <- barplot(accuracies,
+              names.arg = models,
+              main = "CIFAR100 Classification: 100 Object Categories",
+              ylab = "Accuracy (%)",
+              col = colors,
+              border = NA,
+              ylim = c(0, max(accuracies) * 1.35),
+              cex.names = 1.2,
+              cex.axis = 1.1,
+              cex.lab = 1.2)
+
+# Add value labels
+text(bp, accuracies + max(accuracies) * 0.08,
+     sprintf("%.2f%%", accuracies),
+     cex = 1.3, font = 2, col = c("black", "#6A1B9A"))
+
+# Add improvement arrow and annotation
+arrows(bp[1], accuracies[1] + 2, bp[2], accuracies[2] - 2,
+       col = "#6A1B9A", lwd = 3, length = 0.15)
+text(mean(bp), mean(accuracies) + 2,
+     sprintf("×%.0f improvement", accuracies[2]/accuracies[1]),
+     col = "#6A1B9A", font = 2, cex = 1.1)
+
+# Add grid
+grid(nx = NA, ny = NULL, col = "gray90", lty = 1)
+
+# Highlight CNN
+points(bp[2], accuracies[2] * 0.82,
+       pch = 8, col = "gold", cex = 3.5)
+
+# Add note
+mtext("Challenging task: 100 diverse object categories", side = 1, line = 4,
+      cex = 0.9, col = "gray40")
+```
+
+---
+
+# Section 3: Summary Table
+
+```{r cifar-table, echo=FALSE}
+# Create summary table
+cifar_summary <- data.frame(
+  Metric = c("Training Samples", "Test Samples", "Image Size", 
+             "Input Dimensions", "Number of Classes", 
+             "CNN Accuracy", "Parameters", "Training Time"),
+  Value = c("5,000", "1,000", "32×32×3 RGB",
+            "3,072 pixels", "100",
+            sprintf("%.2f%%", accuracy_cnn * 100),
+            "~266,000", "~3 min")
+)
+
+knitr::kable(cifar_summary,
+             align = c("l", "r"),
+             caption = "Section 3: CIFAR100 CNN Summary")
+```
+
+**Key Insight:** CNNs excel at image recognition by learning spatial hierarchies of features automatically.
+
+---
+
+class: inverse, center, middle
+
+# Section 4: Text Classification
+## IMDb Sentiment Analysis
+
+---
+
+# Section 4: Problem Setup
+
+**Task:** Predict sentiment of movie reviews (Positive/Negative)
+
+**Dataset:** IMDb movie reviews
+- 25,000 training reviews
+- 25,000 test reviews
+- Binary classification
+- Reviews stored as sequences of word indices
+
+**Model:** Text Classifier with Embedding Layer
+- Learns word representations automatically
+- Uses global average pooling
+- Simple but effective architecture
+
+---
+
+# Section 4: Load IMDb Data
+
+```{r imdb-data, echo=TRUE}
+# Load IMDb dataset
+max_features <- 10000  # Vocabulary size (most frequent words)
+maxlen <- 500          # Maximum review length
+
+imdb <- dataset_imdb(num_words = max_features)
+
+# Pad sequences to fixed length
+pad_sequences_manual <- function(sequences, maxlen) {
+  result <- matrix(0L, nrow = length(sequences), ncol = maxlen)
+  for (i in seq_along(sequences)) {
+    seq <- sequences[[i]]
+    if (length(seq) > maxlen) 
+      seq <- seq[(length(seq) - maxlen + 1):length(seq)]
+    if (length(seq) > 0) {
+      result[i, (maxlen - length(seq) + 1):maxlen] <- seq
+    }
+  }
+  result
+}
+
+x_train_padded <- pad_sequences_manual(imdb$train$x, maxlen) + 1L
+y_train <- imdb$train$y
+x_test_padded <- pad_sequences_manual(imdb$test$x, maxlen) + 1L
+y_test <- imdb$test$y
+
+cat("Training reviews:", nrow(x_train_padded), "\n")
+cat("Test reviews:", nrow(x_test_padded), "\n")
+cat("Vocabulary size:", max_features, "words\n")
+cat("Sequence length:", maxlen, "words")
+```
+
+---
+
+# Section 4: Build Text Classifier
+
+```{r imdb-model, echo=TRUE}
+# Convert to torch tensors
+x_train_t <- torch_tensor(x_train_padded, dtype = torch_long())
+y_train_t <- torch_tensor(y_train, dtype = torch_float32())$view(c(-1, 1))
+x_test_t <- torch_tensor(x_test_padded, dtype = torch_long())
+y_test_t <- torch_tensor(y_test, dtype = torch_float32())$view(c(-1, 1))
+
+# Define text classifier
+text_classifier <- nn_module(
+  "TextClassifier",
+  initialize = function(vocab_size = 10000, embedding_dim = 32, hidden_dim = 16) {
+    # Embedding layer: converts word indices to dense vectors
+    self$embedding <- nn_embedding(vocab_size + 1, embedding_dim, padding_idx = 1)
+    self$fc1 <- nn_linear(embedding_dim, hidden_dim)
+    self$fc2 <- nn_linear(hidden_dim, 1)
+  },
+  forward = function(x) {
+    x %>%
+      self$embedding() %>%
+      torch_mean(dim = 2) %>%  # Global average pooling
+      self$fc1() %>%
+      nnf_relu() %>%
+      self$fc2() %>%
+      nnf_sigmoid()
+  }
+)
+```
+
+---
+
+# Section 4: Train Text Classifier
+
+```{r imdb-train, echo=TRUE, results='hide'}
+# Train the model
+fitted_text <- text_classifier %>%
+  setup(loss = nn_bce_loss(),
+        optimizer = optim_adam,
+        metrics = list(accuracy = luz_metric_binary_accuracy_with_logits())) %>%
+  set_hparams(vocab_size = max_features, embedding_dim = 32, hidden_dim = 16) %>%
+  set_opt_hparams(lr = 0.001) %>%
+  fit(tensor_dataset(x_train_t, y_train_t),
+      epochs = 5,
+      valid_data = tensor_dataset(x_test_t, y_test_t),
+      dataloader_options = list(batch_size = 128, shuffle = TRUE),
+      verbose = FALSE)
+
+# Calculate accuracy
+preds_text <- predict(fitted_text, tensor_dataset(x_test_t, y_test_t))
+pred_binary <- (preds_text > 0.5)$to(dtype = torch_float32())
+accuracy_text <- as.numeric(torch_sum(pred_binary == y_test_t)) / length(y_test_t)
+```
+
+```{r imdb-result, echo=FALSE}
+cat("Text Classifier Accuracy:", round(accuracy_text * 100, 2), "%\n")
+cat("Random Baseline:", "50.00%\n")
+cat("Improvement:", sprintf("+%.2f%%", (accuracy_text - 0.5) * 100))
+```
+
+---
+
+# Section 4: Text Classification Results
+
+```{r imdb-plot, echo=FALSE, fig.height=6}
+par(mar = c(5, 5, 4, 2))
+
+# Prepare comparison
+models <- c("Random\nBaseline", "Text\nClassifier")
+accuracies <- c(50, accuracy_text * 100)
+colors <- c("#BDBDBD", "#FF9800")
+
+# Create barplot
+bp <- barplot(accuracies,
+              names.arg = models,
+              main = "IMDb Sentiment Analysis: Model Performance",
+              ylab = "Accuracy (%)",
+              col = colors,
+              border = NA,
+              ylim = c(0, 100),
+              cex.names = 1.2,
+              cex.axis = 1.1,
+              cex.lab = 1.2)
+
+# Add value labels
+text(bp, accuracies + 3,
+     sprintf("%.2f%%", accuracies),
+     cex = 1.3, font = 2, col = c("black", "#E65100"))
+
+# Add improvement arrow
+arrows(bp[1], accuracies[1] + 6, bp[2], accuracies[2] - 4,
+       col = "#E65100", lwd = 3, length = 0.15)
+text(mean(bp), mean(accuracies),
+     sprintf("+%.1f%%", accuracies[2] - accuracies[1]),
+     col = "#E65100", font = 2, cex = 1.2)
+
+# Add grid
+grid(nx = NA, ny = NULL, col = "gray90", lty = 1)
+
+# Highlight best
+points(bp[2], accuracies[2] * 0.92,
+       pch = 8, col = "gold", cex = 3.5)
+
+# Add note
+mtext("Binary sentiment classification (Positive/Negative)", side = 1, line = 4,
+      cex = 0.9, col = "gray40")
+```
+
+---
+
+# Section 4: Summary Table
+
+```{r imdb-table, echo=FALSE}
+# Create summary table
+imdb_summary <- data.frame(
+  Metric = c("Training Samples", "Test Samples", "Vocabulary Size",
+             "Sequence Length", "Embedding Dim", "Hidden Units",
+             "Epochs", "Test Accuracy", "Training Time"),
+  Value = c("25,000", "25,000", "10,000 words",
+            "500 words", "32", "16",
+            "5", sprintf("%.2f%%", accuracy_text * 100), "~2 min")
+)
+
+knitr::kable(imdb_summary,
+             align = c("l", "r"),
+             caption = "Section 4: IMDb Text Classifier Summary")
+```
+
+**Key Insight:** Word embeddings capture semantic meaning, enabling effective sentiment analysis without hand-crafted features.
+
+---
+
+class: inverse, center, middle
+
+# Section 5: Time Series Forecasting
+## NYSE Stock Volume Prediction
+
+---
+
+# Section 5: Problem Setup
+
+**Task:** Predict daily stock trading volume using historical data
+
+**Dataset:** NYSE data from ISLR2
+- 6,051 trading days
+- Features: Dow Jones returns, log volume, log volatility
+- 5 days of lagged features
+
+**Models to Compare:**
+1. Linear Autoregressive (AR) model
+2. Recurrent Neural Network (RNN)
+3. Nonlinear AR with neural network
+
+**Evaluation Metric:** R² score (proportion of variance explained)
+
+---
+
+# Section 5: Prepare Time Series Data
+
+```{r nyse-data, echo=TRUE}
+# Load and standardize data
+xdata <- data.matrix(NYSE[, c("DJ_return", "log_volume", "log_volatility")])
+istrain <- NYSE[, "train"]
+xdata <- scale(xdata)
+
+# Function to create lagged features
+lagm <- function(x, k = 1) {
+  n <- nrow(x)
+  rbind(matrix(NA, k, ncol(x)), x[1:(n - k), ])
+}
+
+# Create dataset with 5 lags
+arframe <- data.frame(
+  log_volume = xdata[, "log_volume"],
+  L1 = lagm(xdata, 1), L2 = lagm(xdata, 2), L3 = lagm(xdata, 3),
+  L4 = lagm(xdata, 4), L5 = lagm(xdata, 5)
+)
+arframe <- arframe[-(1:5), ]
+istrain <- istrain[-(1:5)]
+
+cat("Total days:", nrow(arframe), "\n")
+cat("Training days:", sum(istrain), "\n")
+cat("Test days:", sum(!istrain), "\n")
+cat("Features per lag:", 3, "\n")
+cat("Total features:", ncol(arframe) - 1)
+```
+
+---
+
+# Section 5: Model 1 - Linear AR
+
+```{r nyse-linear, echo=TRUE}
+# Fit linear autoregressive model
+arfit <- lm(log_volume ~ ., data = arframe[istrain, ])
+arpred <- predict(arfit, arframe[!istrain, ])
+
+# Calculate R² score
+V0 <- var(arframe[!istrain, "log_volume"])
+r2_ar <- 1 - mean((arpred - arframe[!istrain, "log_volume"])^2) / V0
+
+cat("Linear AR Model:\n")
+cat("  R² Score:", round(r2_ar, 4), "\n")
+cat("  Parameters:", ncol(arframe), "\n")
+cat("  Model Type: Standard Linear Regression")
+```
+
+**Interpretation:** Linear model explains ~`r round(r2_ar * 100, 1)`% of variance in test data.
+
+---
+
+# Section 5: Model 2 - RNN
+
+```{r nyse-rnn, echo=TRUE, results='hide'}
+# Reshape data to 3D: (samples, timesteps, features)
+n <- nrow(arframe)
+xrnn_matrix <- data.matrix(arframe[, -1])
+xrnn_array <- array(0, dim = c(n, 5, 3))
+
+for (i in 1:n) {
+  for (lag in 1:5) {
+    idx_start <- (lag - 1) * 3 + 1
+    idx_end <- lag * 3
+    xrnn_array[i, 6 - lag, ] <- xrnn_matrix[i, idx_start:idx_end]
+  }
+}
+
+# Convert to tensors
+x_train_rnn <- torch_tensor(xrnn_array[istrain, , ], dtype = torch_float32())
+y_train_rnn <- torch_tensor(arframe[istrain, "log_volume"], dtype = torch_float32())$view(c(-1, 1))
+x_test_rnn <- torch_tensor(xrnn_array[!istrain, , ], dtype = torch_float32())
+y_test_rnn <- torch_tensor(arframe[!istrain, "log_volume"], dtype = torch_float32())$view(c(-1, 1))
+
+# Define RNN architecture
+rnn_model <- nn_module(
+  "SimpleRNN",
+  initialize = function(input_size = 3, hidden_size = 12) {
+    self$rnn <- nn_rnn(input_size, hidden_size, batch_first = TRUE, dropout = 0.1)
+    self$fc <- nn_linear(hidden_size, 1)
+  },
+  forward = function(x) {
+    output <- self$rnn(x)
+    self$fc(output[[1]][, -1, ])
+  }
+)
+
+# Train RNN
+fitted_rnn <- rnn_model %>%
+  setup(loss = nn_mse_loss(), optimizer = optim_rmsprop) %>%
+  set_hparams(input_size = 3, hidden_size = 12) %>%
+  set_opt_hparams(lr = 0.001) %>%
+  fit(tensor_dataset(x_train_rnn, y_train_rnn),
+      epochs = 50,
+      valid_data = tensor_dataset(x_test_rnn, y_test_rnn),
+      dataloader_options = list(batch_size = 64),
+      verbose = FALSE)
+
+# Calculate R²
+rnn_pred <- predict(fitted_rnn, x_test_rnn)
+r2_rnn <- 1 - mean((as.numeric(rnn_pred) - arframe[!istrain, "log_volume"])^2) / V0
+```
+
+```{r nyse-rnn-result, echo=FALSE}
+cat("RNN Model:\n")
+cat("  R² Score:", round(r2_rnn, 4), "\n")
+cat("  Hidden Units:", 12, "\n")
+cat("  Model Type: Recurrent Neural Network")
+```
+
+---
+
+# Section 5: Model 3 - Nonlinear AR
+
+```{r nyse-nonlinear, echo=TRUE, results='hide'}
+# Add day-of-week feature and create design matrix
+arframed <- data.frame(day = NYSE[-(1:5), "day_of_week"], arframe)
+x_ar <- model.matrix(log_volume ~ . - 1, data = arframed)
+
+# Convert to tensors
+x_train_ar <- torch_tensor(x_ar[istrain, ], dtype = torch_float32())
+y_train_ar <- torch_tensor(arframe[istrain, "log_volume"], dtype = torch_float32())$view(c(-1, 1))
+x_test_ar <- torch_tensor(x_ar[!istrain, ], dtype = torch_float32())
+y_test_ar <- torch_tensor(arframe[!istrain, "log_volume"], dtype = torch_float32())$view(c(-1, 1))
+
+# Define nonlinear AR model
+nonlinear_ar <- nn_module(
+  "NonlinearAR",
+  initialize = function(input_size) {
+    self$fc1 <- nn_linear(input_size, 32)
+    self$dropout <- nn_dropout(0.5)
+    self$fc2 <- nn_linear(32, 1)
+  },
+  forward = function(x) {
+    x %>% self$fc1() %>% nnf_relu() %>% self$dropout() %>% self$fc2()
+  }
+)
+
+# Train nonlinear AR
+fitted_nar <- nonlinear_ar %>%
+  setup(loss = nn_mse_loss(), optimizer = optim_rmsprop) %>%
+  set_hparams(input_size = ncol(x_ar)) %>%
+  set_opt_hparams(lr = 0.001) %>%
+  fit(tensor_dataset(x_train_ar, y_train_ar),
+      epochs = 100,
+      valid_data = tensor_dataset(x_test_ar, y_test_ar),
+      dataloader_options = list(batch_size = 32),
+      verbose = FALSE)
+
+# Calculate R²
+nar_pred <- predict(fitted_nar, x_test_ar)
+r2_nar <- 1 - mean((as.numeric(nar_pred) - arframe[!istrain, "log_volume"])^2) / V0
+```
+
+```{r nyse-nonlinear-result, echo=FALSE}
+cat("Nonlinear AR Model:\n")
+cat("  R² Score:", round(r2_nar, 4), "\n")
+cat("  Hidden Units:", 32, "\n")
+cat("  Model Type: Feedforward Neural Network with Dropout")
+```
+
+---
+
+# Section 5: Time Series Results
+
+```{r nyse-plot, echo=FALSE, fig.height=6}
+par(mar = c(5, 5, 4, 2))
+
+# Prepare comparison
+models <- c("Linear\nAR", "RNN", "Nonlinear\nAR")
+r2_scores <- c(r2_ar, r2_rnn, r2_nar)
+colors <- c("#EF9A9A", "#E57373", "#E53935")
+
+# Create barplot
+bp <- barplot(r2_scores,
+              names.arg = models,
+              main = "NYSE Volume Prediction: Model Comparison",
+              ylab = expression(R^2~Score),
+              col = colors,
+              border = NA,
+              ylim = c(0, max(r2_scores) * 1.3),
+              cex.names = 1.2,
+              cex.axis = 1.1,
+              cex.lab = 1.2)
+
+# Add value labels
+text(bp, r2_scores + max(r2_scores) * 0.06,
+     sprintf("%.4f", r2_scores),
+     cex = 1.2, font = 2)
+
+# Add grid
+grid(nx = NA, ny = NULL, col = "gray90", lty = 1)
+
+# Highlight best model
+best_idx <- which.max(r2_scores)
+points(bp[best_idx], r2_scores[best_idx] * 0.88,
+       pch = 8, col = "gold", cex = 3.5)
+
+# Add improvement annotation
+if (r2_scores[3] > r2_scores[1]) {
+  arrows(bp[1], r2_scores[1] + 0.01, bp[3], r2_scores[3] - 0.01,
+         col = "#B71C1C", lwd = 2.5, length = 0.12)
+  text(bp[2], mean(r2_scores[c(1, 3)]) + 0.01,
+       sprintf("+%.1f%%", (r2_scores[3] - r2_scores[1]) * 100),
+       col = "#B71C1C", font = 2, cex = 1.1)
+}
+
+# Add note
+mtext("Higher R² = Better prediction accuracy", side = 1, line = 4,
+      cex = 0.9, col = "gray40")
+```
+
+---
+
+# Section 5: Summary Table
+
+```{r nyse-table, echo=FALSE}
+# Create comprehensive comparison
+nyse_summary <- data.frame(
+  Model = c("Linear AR", "RNN", "Nonlinear AR"),
+  Architecture = c("Linear Regression", 
+                   "RNN (12 hidden units)",
+                   "NN: 32 hidden + Dropout"),
+  R_squared = sprintf("%.4f", r2_scores),
+  Percentage = sprintf("%.2f%%", r2_scores * 100),
+  Parameters = c(paste(ncol(arframe)), "~156", "~740"),
+  Training = c("< 1 sec", "~30 sec", "~60 sec"),
+  Epochs = c("-", "50", "100")
+)
+
+knitr::kable(nyse_summary,
+             col.names = c("Model", "Architecture", "R²", "Variance Explained", 
+                          "Parameters", "Training Time", "Epochs"),
+             align = c("l", "l", "r", "r", "r", "r", "r"),
+             caption = "Section 5: NYSE Time Series Forecasting Summary")
+```
+
+**Winner:** Nonlinear AR achieves the best performance, capturing complex patterns without RNN complexity.
+
+---
+
+class: inverse, center, middle
+
+# Overall Summary
+
+---
+
+# Complete Results Across All Sections
+
+```{r final-summary, echo=FALSE}
+# Create comprehensive results table
+summary_df <- data.frame(
+  Section = c("1. Hitters", "", "",
+              "2. MNIST", "",
+              "3. CIFAR100",
+              "4. IMDb",
+              "5. NYSE", "", ""),
+  Dataset = c("Baseball Salaries", "", "",
+              "Digit Images", "",
+              "Object Images",
+              "Movie Reviews",
+              "Stock Volume", "", ""),
+  Model = c("Linear Reg", "Lasso", "Neural Net",
+            "Logistic", "Deep NN",
+            "CNN",
+            "Text Classifier",
+            "Linear AR", "RNN", "Nonlinear AR"),
+  Performance = c(
+    sprintf("%.2f MAE", mae_lm),
+    sprintf("%.2f MAE ★", mae_lasso),
+    sprintf("%.2f MAE", mae_nn),
+    sprintf("%.2f%%", accuracy_lr * 100),
+    sprintf("%.2f%% ★", accuracy_nn * 100),
+    sprintf("%.2f%%", accuracy_cnn * 100),
+    sprintf("%.2f%%", accuracy_text * 100),
+    sprintf("%.4f", r2_ar),
+    sprintf("%.4f", r2_rnn),
+    sprintf("%.4f ★", r2_nar)
+  ),
+  Best_Feature = c("Simple", "Feature Selection", "Nonlinear",
+                  "Fast", "Hierarchical Learning",
+                  "Spatial Features",
+                  "Word Embeddings",
+                  "Fast", "Temporal Memory", "Nonlinearity")
+)
+
+knitr::kable(summary_df,
+             col.names = c("Section", "Dataset", "Model", "Performance", "Key Strength"),
+             align = c("l", "l", "l", "r", "l"),
+             caption = "Complete Deep Learning Lab: All Results (★ = Best Model per Section)")
+```
+
+---
+
+# Key Findings
+
+**Section 1 - Regression:**
+- Lasso's feature selection provides best generalization
+- Neural networks competitive but more complex
+
+**Section 2 - Classification:**
+- Deep networks outperform shallow models
+- Hierarchical features crucial for complex patterns
+
+**Section 3 - Image Recognition:**
+- CNNs dramatically outperform random guessing
+- Convolutional layers learn spatial hierarchies
+
+**Section 4 - Text Analysis:**
+- Word embeddings capture semantic meaning
+- Simple architecture achieves strong performance
+
+**Section 5 - Time Series:**
+- Nonlinear AR best balances complexity and performance
+- RNNs useful but not always superior
+
+---
+
+# Conclusion
+
+**When to Use Each Architecture:**
+
+1. **Feedforward Neural Networks:**
+   - Tabular/structured data
+   - When feature engineering is available
+   - Fast training required
+
+2. **Convolutional Neural Networks:**
+   - Image and spatial data
+   - Pattern recognition tasks
+   - When translation invariance matters
+
+3. **Recurrent Neural Networks:**
+   - Sequential data (time series, text)
+   - When temporal dependencies crucial
+   - Long-range context needed
+
+**General Principles:**
+- Start simple, add complexity as needed
+- More data benefits deeper models
+- Regularization (dropout, early stopping) prevents overfitting
+- Architecture should match data structure
+
+---
+
+# Deep Learning in Economics
+
+**Current Applications:**
+- **Finance:** Algorithmic trading, risk assessment, fraud detection
+- **Credit Scoring:** Automated loan decisions using alternative data
+- **Marketing:** Customer segmentation and targeting
+- **Supply Chain:** Demand forecasting and optimization
+- **Macroeconomics:** GDP prediction, inflation forecasting
+
+**Future Directions:**
+- Interpretable AI for policy decisions
+- Transfer learning for limited economic data
+- Combining economic theory with deep learning
+- Real-time economic monitoring systems
+
+**Challenges:**
+- Data availability and quality
+- Model interpretability
+- Regulatory compliance
+- Economic stability vs model complexity
+
+---
+
+class: inverse, center, middle
+
+# Thank You!
+
+**Questions?**
+
+Contact: [your.email@university.edu]
+
+Presentation created with R, xaringan, torch, and luz
+
+---

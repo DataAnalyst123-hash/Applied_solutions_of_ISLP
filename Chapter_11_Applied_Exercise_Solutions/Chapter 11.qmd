@@ -1,0 +1,278 @@
+---
+title: "Survival Analysis and Censored Data"
+subtitle: "Chapter 11: ISLR2 Exercise Solutions"
+author: "Shad Ali Shah"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    number-sections: true
+    number-depth: 3
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
+    theme: cosmo
+    colorlinks: true
+    link-citations: true
+    df-print: kable
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    crossref:
+      fig-title: "Figure"
+      tbl-title: "Table"
+      fig-prefix: "Fig."
+      tbl-prefix: "Table"
+execute:
+  echo: true
+  warning: false
+  message: false
+  error: true
+  cache: false
+  keep-going: true
+  fig-width: 6.5
+  fig-height: 4
+jupyter: python3
+---
+
+# Chapter 11
+
+```{python}
+from matplotlib.pyplot import subplots
+import numpy as np
+import pandas as pd
+from ISLP.models import ModelSpec as MS
+from ISLP import load_data
+from lifelines import (KaplanMeierFitter,CoxPHFitter)
+from lifelines.statistics import (logrank_test,multivariate_logrank_test)
+from ISLP.survival import sim_time
+import scipy
+import scipy.stats as sc
+```
+
+## Exercise 10
+
+```{python}
+BrainCancer=load_data('BrainCancer')
+BrainCancer.columns
+```
+
+```{python}
+BrainCancer.head()
+```
+
+### (a)
+
+```{python}
+#Find the confidence level of z-score=1
+alpha=1-sc.norm.cdf(1)
+```
+
+```{python}
+fig, ax = subplots(figsize=(8,8))
+km = KaplanMeierFitter()
+km_brain = km.fit(BrainCancer['time'], BrainCancer['status'],alpha=alpha)
+km_brain.plot(label='Kaplan Meier estimate', ax=ax);
+```
+
+```{python}
+km_brain.survival_function_
+```
+
+### (b)
+
+```{python}
+BrainCancer.index
+```
+
+```{python}
+#Define indexes of the bootstrap sample
+rng=np.random.default_rng(0)
+boot_index=rng.choice(BrainCancer.index,88,replace=True)
+```
+
+```{python}
+#Define the sample
+sample=pd.DataFrame({'obs':BrainCancer['time'].iloc[boot_index],
+                     'status':BrainCancer['status'].iloc[boot_index]})
+
+```
+
+```{python}
+km = KaplanMeierFitter()
+km_brain = km.fit(sample['obs'], BrainCancer['status'],alpha=1)
+km_brain.survival_function_
+```
+
+```{python}
+#Now let's repeat the process 200 times
+B=200
+km_brain_list=[]
+
+for _ in range(B):
+    boot_index=rng.choice(BrainCancer.index,88,replace=True)
+    sample=pd.DataFrame({'obs':BrainCancer['time'].iloc[boot_index],
+                     'status':BrainCancer['status'].iloc[boot_index]})
+    km_brain_list.append(km.fit(sample['obs'], BrainCancer['status'],alpha=1))
+survival=km_brain_list[0].survival_function_
+for i in range(1,B):
+    survival=survival+km_brain_list[i].survival_function_
+survival=survival/B
+```
+
+```{python}
+survival
+```
+
+```{python}
+timeline=survival.index.values
+```
+
+```{python}
+#Compute the number of events at time t of the bootstrap survival function
+q=[]
+for i in range(len(timeline)):
+    q.append(np.sum(BrainCancer['status'][BrainCancer['time']<timeline[i]]))
+```
+
+```{python}
+#Compute the difference between the number of subjects at risk and died subjects at time t of
+#the bootstrap survival function
+r=[]
+for i in range(len(timeline)):
+    r.append(np.count_nonzero(BrainCancer['status'][BrainCancer['time']>=timeline[i]]==0)
+              +np.sum(BrainCancer['status']))
+```
+
+```{python}
+r_q=[]
+for i in range(len(r)):
+    r_q.append(r[i]-q[i])
+rr_q=list(map(lambda x, y: x * y, r, r_q))
+inv_rr_q=list(map(lambda x, y: x / y, [1]*len(rr_q), rr_q))
+qinv_rr_q=list(map(lambda x, y: x * y, r, inv_rr_q))
+```
+
+```{python}
+len(qinv_rr_q)
+```
+
+```{python}
+#Now let's compute standard error of each each bootstraped survival observation using Greenwood formula
+ste=[]
+for i in range(len(timeline)):
+    S2=survival.iloc[i]['KM_estimate']**2
+    factor=0
+    for j in range(i+1):
+       factor+=qinv_rr_q[j] 
+    ste.append(S2*factor)
+```
+
+```{python}
+ste_df=pd.DataFrame({'timeline':timeline,'Standard error':ste})
+```
+
+```{python}
+ste_df
+```
+
+### (c)
+
+```{python}
+cleaned = BrainCancer.dropna()#delete the missing data
+coxph = CoxPHFitter # shorthand
+model_df=MS(cleaned,intercept=False).fit_transform(cleaned)
+cox_fit = coxph().fit(model_df,'time','status')
+cox_fit.summary[['coef', 'se(coef)', 'p']]
+```
+
+### (d)
+
+```{python}
+BrainCancer['ki'].unique()
+```
+
+```{python}
+cleaned['ki'][cleaned['ki']==40]
+```
+
+```{python}
+cleaned['ki'] = cleaned['ki'].replace([40], [60])
+```
+
+```{python}
+cleaned['ki'].iloc[62]
+```
+
+```{python}
+fig, ax = subplots(figsize=(8,8))
+by_ki = {}
+for ki, df in cleaned.groupby('ki'):
+    by_ki[ki] = df
+    km_ki = km.fit(df['time'], df['status'])
+    km_ki.plot(label='Ki=%s' % ki, ax=ax)
+```
+
+## Exercise 11
+
+```{python}
+#Let first create the table 11.4 in csv format and import it to do the assignments
+df=pd.read_csv('table11_4.csv')
+```
+
+```{python}
+df.info()
+```
+
+### (a)
+
+```{python}
+df['group']=np.where(df['X']<2,1,2)
+```
+
+```{python}
+fig, ax = subplots(figsize=(8,8))
+by_X = {}
+for group, df12 in df.groupby('group'):
+    by_X[group] = df12
+    km_group = km.fit(df12['Y'], df12['delta'])
+    km_group.plot(label='Group %s' % group, ax=ax)
+```
+
+We see the confidence intervals of both groups are quite the same. We conjecture that there is no significant difference between the two survival curves.
+
+### (b)
+
+```{python}
+coxph = CoxPHFitter
+group_df=df[['Y','delta','group']]
+model_df=MS(['Y','delta','group'],intercept=False).fit_transform(group_df)
+cox_fit = coxph().fit(model_df,'Y','delta')
+cox_fit.summary[['coef', 'se(coef)', 'p']]
+```
+
+The baseline group here is 1. The result shows that the risk associated with group 1
+is more than 1.40 times (i.e. $e^{0.34}=1.404$) the risk associated
+with group 2.
+
+The resulting $p$-value is 0.78, indicating no evidence of a difference in survival between the two groups. Therefore, the true coefficient is significantly null.
+
+### (c)
+
+```{python}
+by_X
+```
+
+```{python}
+logrank_test(by_X[1]['Y'],
+             by_X[2]['Y'],
+             by_X[1]['delta'],
+             by_X[2]['delta'])
+```
+
+The resulting $p$-value is 0.78 for the log-rank test, which is the same value found for the Cox model.
+
+```{python}
+
+```
